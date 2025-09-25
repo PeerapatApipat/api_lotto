@@ -6,8 +6,13 @@ const bodyParser = require("body-parser");
 
 const app = express();
 
+<<<<<<< HEAD
 // Use PORT from environment (Render sets this) or fallback to 3000
 const port = process.env.PORT || 3000;
+=======
+// ใช้ PORT จาก environment variable หรือ default 3000
+const port = 3000;
+>>>>>>> e7d8e11561252fcf8053ae17a8f28699ef64ba54
 
 // หา IP address
 var os = require("os");
