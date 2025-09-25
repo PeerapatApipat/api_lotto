@@ -7,7 +7,7 @@ const bodyParser = require("body-parser");
 const app = express();
 
 // ใช้ PORT จาก environment variable หรือ default 3000
-const port = process.env.PORT || 3000;
+const port = 3000;
 
 // หา IP address
 var os = require("os");
