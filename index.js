@@ -1,15 +1,18 @@
 const express = require("express");
+
 const mysql = require("mysql2");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const bodyParser = require("body-parser");
+const { register } = require("module");
+const { resolve } = require("path");
+const { rejects } = require("assert");
+const { error, log } = require("console");
+const { emit } = require("process");
 
 const app = express();
+port = 3000;
 
-// Use PORT from environment (Render sets this) or fallback to 3000
-const port = process.env.PORT || 3000;
-
-// หา IP address
 var os = require("os");
 var ip = "0.0.0.0";
 var ips = os.networkInterfaces();
@@ -19,69 +22,37 @@ Object.keys(ips).forEach(function (_interface) {
   });
 });
 
-// Database configuration with connection pooling and error handling
-const dbConfig = {
-  host: process.env.DB_HOST || "202.28.34.203",
-  port: process.env.DB_PORT || 3306,
-  user: process.env.DB_USER || "mb68_66011212249",
-  password: process.env.DB_PASSWORD || "O+Wjs1sL88ch",
-  database: process.env.DB_NAME || "mb68_66011212249",
-  timezone: 'Z',
-  // Connection pooling settings
-  connectionLimit: 10,
-  acquireTimeout: 60000,
-  timeout: 60000,
-  reconnect: true,
-  charset: 'utf8mb4'
-};
+app.listen(port, () => {
+  console.log(` API listening at http://${ip}:${port}`);
+});
 
-// สร้าง connection pool แทน single connection
-const db = mysql.createPool(dbConfig);
+const db = mysql.createConnection({
+  host: "202.28.34.203",
+  port: 3306,
+  user: "mb68_66011212249",
+  password: "O+Wjs1sL88ch",
+  database: "mb68_66011212249",
+  timezone: 'Z', 
 
-// ตั้งค่า JWT secrets จาก environment variables
-const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || "abcdefg";
-const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || "aabbccddeeffgg";
+});
 
-// Test database connection
-function testDatabaseConnection() {
-  return new Promise((resolve, reject) => {
-    db.getConnection((err, connection) => {
-      if (err) {
-        console.error('Database connection failed:', err);
-        reject(err);
-        return;
-      }
-      
-      console.log('Database connected successfully!');
-      
-      // Test query
-      connection.query('SELECT 1 as test', (error, results) => {
-        connection.release(); // Return connection to pool
-        
-        if (error) {
-          console.error('Database test query failed:', error);
-          reject(error);
-          return;
-        }
-        
-        console.log('Database test query successful');
-        resolve(results);
-      });
-    });
-  });
-}
+const ACCESS_TOKEN_SECRET = "abcdefg";
+REFRESH_TOKEN_SECRET = "aabbccddeeffgg";
+db.connect((err) => {
+  if (err) {
+    throw err;
+  }
+  console.log("MySql connectd...");
+});
 
-// Improved queryDatabase function with better error handling
-function queryDatabase(sql, params = []) {
-  return new Promise((resolve, reject) => {
+function queryDatabase(sql, params) {
+  return new Promise((resolve, rejects) => {
     db.query(sql, params, (err, result) => {
       if (err) {
-        console.error('Query error:', err);
         resolve({
           error: err,
           data: [],
         });
-        return;
       }
       resolve({
         error: "",
@@ -91,38 +62,7 @@ function queryDatabase(sql, params = []) {
   });
 }
 
-// Middleware
 app.use(bodyParser.json());
-
-// Health check endpoint
-app.get("/health", async (req, res) => {
-  try {
-    const result = await queryDatabase('SELECT 1 as health_check');
-    if (result.error) {
-      res.status(500).json({
-        status: "error",
-        message: "Database connection failed",
-        error: result.error.message
-      });
-    } else {
-      res.json({
-        status: "success",
-        message: "Server and database are healthy",
-        timestamp: new Date().toISOString()
-      });
-    }
-  } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message: "Health check failed",
-      error: error.message
-    });
-  }
-});
-
-function log(message) {
-  console.log(message);
-}
 
 app.get("/", (req, res) => {
   console.log("client test defaul path");
@@ -1349,44 +1289,3 @@ app.post("/api/claim-prize", authencationToken, async (req, res) => {
 
 
 
-
-// Graceful shutdown handling
-process.on('SIGINT', () => {
-  console.log('Received SIGINT, shutting down gracefully...');
-  db.end(() => {
-    console.log('Database connection closed.');
-    process.exit(0);
-  });
-});
-
-process.on('SIGTERM', () => {
-  console.log('Received SIGTERM, shutting down gracefully...');
-  db.end(() => {
-    console.log('Database connection closed.');
-    process.exit(0);
-  });
-});
-
-// Start server function
-async function startServer() {
-  try {
-    // Test database connection first
-    await testDatabaseConnection();
-    
-    // Start the server
-    app.listen(port, '0.0.0.0', () => {
-      console.log(`🚀 Server is running at http://${ip}:${port}`);
-      console.log(`📊 Health check: http://${ip}:${port}/health`);
-      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    });
-    
-  } catch (error) {
-    console.error('❌ Failed to start server:', error);
-    process.exit(1);
-  }
-}
-
-// Start the server
-startServer();
-
-// Export app for testing
