@@ -6,7 +6,7 @@ const bodyParser = require("body-parser");
 
 const app = express();
 
-// ใช้ PORT จาก environment variable หรือ default 3000
+// Use PORT from environment (Render sets this) or fallback to 3000
 const port = process.env.PORT || 3000;
 
 // หา IP address
@@ -120,7 +120,9 @@ app.get("/health", async (req, res) => {
   }
 });
 
-app.use(bodyParser.json());
+function log(message) {
+  console.log(message);
+}
 
 app.get("/", (req, res) => {
   console.log("client test defaul path");
@@ -416,9 +418,7 @@ app.post("/user/logout", (req, res) => {
   });
 });
 
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
-});
+
 
 
 
