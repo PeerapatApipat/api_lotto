@@ -42,13 +42,21 @@ const db = mysql.createPool({
 
 const ACCESS_TOKEN_SECRET = "abcdefg";
 REFRESH_TOKEN_SECRET = "aabbccddeeffgg";
-db.connect((err) => {
-  if (err) {
-    throw err;
-  }
-  console.log("MySql connectd...");
-});
+// db.connect((err) => {
+//   if (err) {
+//     throw err;
+//   }
+//   console.log("MySql connectd...");
+// });
 
+
+db.query("SELECT 1", (err, result) => {
+  if (err) {
+    console.error("Database test error:", err);
+  } else {
+    console.log("Database connected successfully!");
+  }
+});
 function queryDatabase(sql, params) {
   return new Promise((resolve, rejects) => {
     db.query(sql, params, (err, result) => {
