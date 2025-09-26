@@ -947,7 +947,7 @@ app.get("/api/purchases/:user_id", authencationToken, async (req, res) => {
 
 /////////////////////CREATE PURCHASE (เลือกหวย)
 app.post("/api/purchases", authencationToken, async (req, res) => {
-  const c = db.promise().getConnection(); 
+  const c = await  db.promise().getConnection(); 
   try {
     const { lotto_id } = req.body;
     if (!lotto_id) {
@@ -1001,7 +1001,7 @@ app.post("/api/purchases", authencationToken, async (req, res) => {
 ///////////////////GET CART (เฉพาะ pending)
 app.get("/api/cart", authencationToken, async (req, res) => {
   try {
-    const c = db.promise().getConnection();
+    const c = await db.promise().getConnection();
     const [rows] = await c.query(
       `SELECT p.purchase_id, l.lotto_id, l.number, l.price, l.draw_date
        FROM purchases p
@@ -1021,7 +1021,7 @@ app.get("/api/cart", authencationToken, async (req, res) => {
 
 ////////// CANCEL PURCHASE
 app.patch("/api/purchases/:id/cancel", authencationToken, async (req, res) => {
-  const c = db.promise().getConnection();
+  const c = await db.promise().getConnection();
   try {
     const pid = Number(req.params.id) || 0;
     if (!pid) return res.status(400).json({ success: false, message: "Missing purchase_id" });
@@ -1059,7 +1059,7 @@ app.patch("/api/purchases/:id/cancel", authencationToken, async (req, res) => {
 
 
 app.post("/api/checkout", authencationToken, async (req, res) => {
-  const c = db.promise().getConnection();
+  const c = await db.promise().getConnection();
   try {
     await c.beginTransaction();
 
