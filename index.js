@@ -24,7 +24,7 @@ Object.keys(ips).forEach(function (_interface) {
 
 
 
-const db = mysql.createConnection({
+const db = mysql.createPool({
   host: "202.28.34.203",
   port: 3306,
   user: "mb68_66011212249",
