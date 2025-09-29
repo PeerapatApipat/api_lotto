@@ -1,5 +1,4 @@
 const express = require("express");
-
 const mysql = require("mysql2");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -22,59 +21,64 @@ Object.keys(ips).forEach(function (_interface) {
   });
 });
 
-
-
+// =============== DATABASE CONNECTION POOL - OPTIMIZED ===============
 const db = mysql.createPool({
   host: "202.28.34.203",
   port: 3306,
   user: "mb68_66011212249",
   password: "O+Wjs1sL88ch",
   database: "mb68_66011212249",
-  timezone: 'Z', 
-
-
-   connectionLimit: 10,
+  timezone: 'Z',
+  connectionLimit: 20,        // เพิ่มจาก 10 -> 20
+  queueLimit: 0,              // ไม่จำกัด queue
   acquireTimeout: 30000,
   timeout: 30000,
-  reconnect: true,
+  waitForConnections: true,   // รอ connection ว่างแทนที่จะ error
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0,
   charset: 'utf8mb4'
 });
 
+// สร้าง promise wrapper สำหรับใช้ async/await
+const promisePool = db.promise();
+
 const ACCESS_TOKEN_SECRET = "abcdefg";
 REFRESH_TOKEN_SECRET = "aabbccddeeffgg";
-// db.connect((err) => {
-//   if (err) {
-//     throw err;
-//   }
-//   console.log("MySql connectd...");
-// });
 
+// =============== TEST CONNECTION ===============
+promisePool.query("SELECT 1")
+  .then(() => {
+    console.log("✅ Database connected successfully!");
+  })
+  .catch((err) => {
+    console.error("❌ Database test error:", err);
+  });
 
-db.query("SELECT 1", (err, result) => {
-  if (err) {
-    console.error("Database test error:", err);
-  } else {
-    console.log("Database connected successfully!");
-  }
-});
+// =============== HELPER FUNCTION - FIXED ===============
 function queryDatabase(sql, params) {
-  return new Promise((resolve, rejects) => {
+  return new Promise((resolve, reject) => {
     db.query(sql, params, (err, result) => {
       if (err) {
+        reject(err); // ⚠️ แก้จาก resolve เป็น reject
+      } else {
         resolve({
-          error: err,
-          data: [],
+          error: "",
+          data: result,
         });
       }
-      resolve({
-        error: "",
-        data: result,
-      });
     });
   });
 }
 
+// =============== MIDDLEWARE ===============
 app.use(bodyParser.json());
+
+// เพิ่ม request timeout
+app.use((req, res, next) => {
+  req.setTimeout(30000); // 30 วินาที
+  res.setTimeout(30000);
+  next();
+});
 
 app.get("/", (req, res) => {
   console.log("client test defaul path");
@@ -128,7 +132,7 @@ app.post("/user/register", async (req, res) => {
       return;
     }
 
-      let sqlStruser = "SELECT username FROM users WHERE username=?";
+    let sqlStruser = "SELECT username FROM users WHERE username=?";
     let resultuser = await queryDatabase(sqlStruser, [name]);
     if (resultuser.data && resultuser.data.length > 0) {
       res.send({
@@ -137,9 +141,6 @@ app.post("/user/register", async (req, res) => {
       });
       return;
     }
-
-
-    
 
     //hash pwd
     const hashPassword = bcrypt.hashSync(password, 8);
@@ -169,9 +170,6 @@ app.post("/user/register", async (req, res) => {
     return;
   }
 });
-
-
-
 
 app.post("/user/login", async (req, res) => {
   const { email, password } = req.body;
@@ -240,20 +238,19 @@ app.post("/user/login", async (req, res) => {
     );
 
     res.send({
-  status: "success",
-  message: "",
-  data: {
-    accessToken: accessToken,
-    refreshToken: refreshToken,
-    role: user.role,
-    username: user.username,   // ส่งชื่อ
-    userid: user.user_id,  
-    wallet: user.wallet,       // ส่ง wallet
-    email: user.email,       // ส่ง email
-  },
-});
-    console.log("Logged in user_id:", user.user_id); // ✅ แก้ตรงนี้
-
+      status: "success",
+      message: "",
+      data: {
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+        role: user.role,
+        username: user.username,
+        userid: user.user_id,
+        wallet: user.wallet,
+        email: user.email,
+      },
+    });
+    console.log("Logged in user_id:", user.user_id);
 
     return;
   }
@@ -370,18 +367,12 @@ app.post("/user/logout", (req, res) => {
   });
 });
 
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
-});
-
-
-
 //keen
 
 // API สำหรับดึงรางวัลตามวันที่
 app.post("/lotto/prize", async (req, res) => {
   try {
-    const { drawdate } = req.body; // "2025-09-20"
+    const { drawdate } = req.body;
     log(drawdate);
     if (!drawdate) {
       return res.status(400).send({
@@ -389,7 +380,7 @@ app.post("/lotto/prize", async (req, res) => {
         message: "กรุณาส่ง drawdate ด้วย",
       });
     }
-        
+
     const sqlStr = `
       SELECT ln.number, wn.prize_amount, wn.prize_rank, wn.lotto_id
       FROM winning_numbers wn
@@ -407,7 +398,7 @@ app.post("/lotto/prize", async (req, res) => {
         data: [],
       });
     }
-        
+
     res.send({
       status: "success",
       message: "",
@@ -422,29 +413,17 @@ app.post("/lotto/prize", async (req, res) => {
   }
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
 // API สำหรับตรวจสอบรางวัล
 app.post("/lotto/checkprize", async (req, res) => {
   try {
     const { number, drawdate, username } = req.body;
-        
+
     log("ส่งมา number = " + number + " drawdate = " + drawdate + " username = " + username);
-    
+
     if (!number || !drawdate || !username) {
-      return res.status(400).json({ 
-        status: "error", 
-        message: "ข้อมูลไม่ครบ" 
+      return res.status(400).json({
+        status: "error",
+        message: "ข้อมูลไม่ครบ"
       });
     }
 
@@ -462,7 +441,6 @@ app.post("/lotto/checkprize", async (req, res) => {
         AND ln.number like ?
         AND DATE(ln.draw_date) = ?
         AND p.status = 'purchased'
-      
     `;
     const purchaseResult = await queryDatabase(purchaseSql, [username, number, drawdate]);
 
@@ -477,43 +455,25 @@ app.post("/lotto/checkprize", async (req, res) => {
     const lottoId = purchaseResult.data[0].lotto_id;
     log(lottoId.toString());
 
-
-
-    
-
     // ตรวจสอบว่าถูกรางวัลหรือไม่
     const winningSql = `
       SELECT ln.number, wn.prize_amount, wn.prize_rank ,wn.lotto_id
       FROM winning_numbers wn JOIN lotto_numbers ln ON wn.lotto_id = ln.lotto_id
       WHERE wn.lotto_id = ? and ln.status = 'sold'
-
-      `;
-
-
-     
-
+    `;
 
     const winningResult = await queryDatabase(winningSql, [lottoId]);
 
     if (!winningResult.data || winningResult.data.length === 0) {
-        // console.log("ยังไม่ได้ถูกรางวัล", lottoId);
-
       return res.send({
         status: "success",
         message: "ยังไม่ได้ถูกรางวัล",
-        data: [], 
+        data: [],
       });
     }
 
-    // ถูกรางวัล - ส่งข้อมูลรางวัลกลับไป
-    // const prizeData = winningResult.data.map((item) => ({
-    //   number: purchaseResult.data[0].number,
-    //   prizeRank: item.prize_rank,
-    //   prizeAmount: item.prize_amount,
-    // }));
-   console.log("ยินดีด้วย ", lottoId);
+    console.log("ยินดีด้วย ", lottoId);
     return res.send({
-      
       status: "success",
       message: "ยินดีด้วย! ถูกรางวัล",
       data: winningResult.data,
@@ -528,19 +488,6 @@ app.post("/lotto/checkprize", async (req, res) => {
   }
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 //////////
 app.get("/lotto-admin-sold", authencationToken, async (req, res) => {
   try {
@@ -548,21 +495,20 @@ app.get("/lotto-admin-sold", authencationToken, async (req, res) => {
     let sqlStr;
     let params = [];
 
-     if (type === "sold") {
+    if (type === "sold") {
       sqlStr = `
-          SELECT 
-  l.lotto_id,
-  l.number AS lotto_number,
-  l.price,
-  l.status AS purchase_status,
-  MAX(w.prize_rank) AS prize_rank,
-  DATE_FORMAT(l.draw_date, '%Y-%m-%d') AS draw_date
-FROM lotto_numbers l
-LEFT JOIN winning_numbers w ON l.lotto_id = w.lotto_id
-WHERE l.status = 'sold'
-GROUP BY l.lotto_id, l.number, l.price, l.status, l.draw_date
-ORDER BY l.lotto_id DESC;
-
+        SELECT 
+          l.lotto_id,
+          l.number AS lotto_number,
+          l.price,
+          l.status AS purchase_status,
+          MAX(w.prize_rank) AS prize_rank,
+          DATE_FORMAT(l.draw_date, '%Y-%m-%d') AS draw_date
+        FROM lotto_numbers l
+        LEFT JOIN winning_numbers w ON l.lotto_id = w.lotto_id
+        WHERE l.status = 'sold'
+        GROUP BY l.lotto_id, l.number, l.price, l.status, l.draw_date
+        ORDER BY l.lotto_id DESC;
       `;
     } else if (type === "available") {
       sqlStr = `
@@ -602,9 +548,6 @@ ORDER BY l.lotto_id DESC;
   }
 });
 
-
-
-
 //สร้างใบล้อตโต้เพื่อขาย
 app.post("/admin/generate-lotto-batch", authencationToken, async (req, res) => {
   try {
@@ -617,7 +560,6 @@ app.post("/admin/generate-lotto-batch", authencationToken, async (req, res) => {
     let { count } = req.body;
     count = parseInt(count, 10) || 100;
 
-   
     const existing = await queryDatabase(
       "SELECT number FROM lotto_numbers",
       []
@@ -671,19 +613,11 @@ app.post("/admin/generate-lotto-batch", authencationToken, async (req, res) => {
   }
 });
 
-
-
-
-
-
-
-
 //รีเซทดาต้าเบสจริง
 app.post("/reset", authencationToken, async (req, res) => {
   try {
     const adminUsername = "admin1";
 
-    // ลบข้อมูลทุกตาราง
     await db.promise().query("DELETE FROM winning_numbers");
     await db.promise().query("DELETE FROM purchases");
     await db.promise().query("DELETE FROM lotto_numbers");
@@ -691,7 +625,6 @@ app.post("/reset", authencationToken, async (req, res) => {
       .promise()
       .query("DELETE FROM users WHERE username <> ?", [adminUsername]);
 
-    // รีเซ็ต Auto Increment
     await db
       .promise()
       .query("ALTER TABLE lotto_numbers AUTO_INCREMENT = 1");
@@ -710,11 +643,6 @@ app.post("/reset", authencationToken, async (req, res) => {
   }
 });
 
-
-
-
-
-
 // API สุ่มลอตโต้
 app.post("/lotto/draw", async (req, res) => {
   try {
@@ -727,26 +655,23 @@ app.post("/lotto/draw", async (req, res) => {
       sql = "SELECT number FROM lotto_numbers";
     }
 
-    const result = await queryDatabase(sql); // queryDatabase คืน { error, data }
+    const result = await queryDatabase(sql);
     if (result.error) {
       return res.send({ status: "error", message: result.error.sqlMessage || "Database error" });
     }
 
-    const numbers = result.data; // numbers ต้องใช้ result.data
+    const numbers = result.data;
 
     if (!numbers || numbers.length === 0) {
       return res.send({ status: "error", message: "ไม่มีเลขลอตเตอรี่สำหรับสุ่ม" });
     }
 
-    // สุ่มรางวัล 1-3
     const shuffled = numbers.sort(() => 0.5 - Math.random());
     const prizeNumbers = shuffled.slice(0, 3).map((row) => row.number ?? "000000");
     const [prize1, prize2, prize3] = prizeNumbers;
 
-    // รางวัล 4 = เลขท้าย 3 ตัวของ prize1
     const prize4 = (prize1 ?? "000000").slice(-3);
 
-    // รางวัล 5 = สุ่มเลขท้าย 2 ตัวจากเลขทั้งหมด
     const allNums = numbers.map((row) => row.number ?? "00");
     const randomNumber = allNums[Math.floor(Math.random() * allNums.length)];
     const prize5 = (randomNumber ?? "00").slice(-2);
@@ -770,9 +695,6 @@ function queryDatabaseStrict(sql, params) {
   });
 }
 
-
-
-
 app.post("/lotto/save", async (req, res) => {
   console.log("body received:", req.body);
   const { draw_date, prizes } = req.body;
@@ -790,7 +712,6 @@ app.post("/lotto/save", async (req, res) => {
       const prizeNumber = prizes[rank].number.toString().padStart(6, "0");
       const prizeAmount = prizes[rank].amount;
 
-      // หาเลขที่มีอยู่ใน lotto_numbers
       const rows = await queryDatabaseStrict(
         `SELECT lotto_id FROM lotto_numbers 
          WHERE number = ? OR RIGHT(number,3) = RIGHT(?,3) OR RIGHT(number,2) = RIGHT(?,2)
@@ -799,7 +720,6 @@ app.post("/lotto/save", async (req, res) => {
       );
 
       if (rows.length === 0) {
-        // ไม่เจอเลข → ตี error
         await queryDatabaseStrict("ROLLBACK").catch(() => {});
         return res.send({
           status: "error",
@@ -809,13 +729,11 @@ app.post("/lotto/save", async (req, res) => {
 
       const lottoId = rows[0].lotto_id;
 
-      // **อัปเดต draw_date ของ lotto_numbers ทุกครั้ง**
       await queryDatabaseStrict(
         "UPDATE lotto_numbers SET draw_date = ? WHERE lotto_id = ?",
         [draw_date, lottoId]
       );
 
-      // บันทึกผลรางวัล
       const existingPrize = await queryDatabaseStrict(
         "SELECT id FROM winning_numbers WHERE lotto_id = ? AND prize_rank = ?",
         [lottoId, prizeRank]
@@ -843,11 +761,7 @@ app.post("/lotto/save", async (req, res) => {
   }
 });
 
-
-
 //////////////////////////////////////ot/////////////////////////////////////
-
-
 
 app.get("/lotto", async (req, res) => {
   try {
@@ -862,13 +776,11 @@ app.get("/lotto", async (req, res) => {
   }
 });
 
-
-
 // ---------------- GET PURCHASE HISTORY ----------------
 app.get("/api/purchases/:user_id", authencationToken, async (req, res) => {
   console.log("===== GET PURCHASE HISTORY START =====");
 
-  const tokenUserId = req.user.id; // user_id จาก JWT (email)
+  const tokenUserId = req.user.id;
   const paramUserId = parseInt(req.params.user_id, 10);
 
   if (isNaN(paramUserId)) {
@@ -905,7 +817,6 @@ app.get("/api/purchases/:user_id", authencationToken, async (req, res) => {
 
     const [rows] = await db.promise().query(sql, [tokenUserId]);
 
-    // จัด group ตาม lotto_id แล้วเก็บ prizes เป็น array
     const purchasesMap = new Map();
 
     for (const row of rows) {
@@ -938,71 +849,58 @@ app.get("/api/purchases/:user_id", authencationToken, async (req, res) => {
   console.log("===== GET PURCHASE HISTORY END =====");
 });
 
-
-
-
-
-
-
-
-/////////////////////CREATE PURCHASE (เลือกหวย)
+/////////////////////CREATE PURCHASE (เลือกหวย) - FIXED
 app.post("/api/purchases", authencationToken, async (req, res) => {
-  const c = await  db.promise().getConnection(); 
+  const connection = await promisePool.getConnection();
   try {
     const { lotto_id } = req.body;
     if (!lotto_id) {
       return res.status(400).json({ success: false, message: "Missing lotto_id" });
     }
 
-    await c.beginTransaction();
+    await connection.beginTransaction();
 
-    // (กันการสวม user_id จาก body)
-    const [u] = await c.query("SELECT user_id FROM users WHERE email=?", [req.user.id]);
+    const [u] = await connection.query("SELECT user_id FROM users WHERE email=?", [req.user.id]);
     if (u.length === 0) {
-      await c.rollback();
+      await connection.rollback();
       return res.status(401).json({ success: false, message: "Unauthorized user" });
     }
     const user_id = u[0].user_id;
 
-    const [lrows] = await c.query(
+    const [lrows] = await connection.query(
       "SELECT lotto_id FROM lotto_numbers WHERE lotto_id=? AND status='available' FOR UPDATE",
       [lotto_id]
     );
     if (lrows.length === 0) {
-      await c.rollback();
+      await connection.rollback();
       return res.status(400).json({ success: false, message: "หวยนี้ถูกเลือก/ขายไปแล้ว" });
     }
 
-    await c.query("UPDATE lotto_numbers SET status='in_cart' WHERE lotto_id=?", [lotto_id]);
+    await connection.query("UPDATE lotto_numbers SET status='in_cart' WHERE lotto_id=?", [lotto_id]);
 
-    const [pres] = await c.query(
+    const [pres] = await connection.query(
       "INSERT INTO purchases (user_id, lotto_id, status, purchase_date) VALUES (?, ?, 'pending', NOW())",
       [user_id, lotto_id]
     );
 
-    await c.commit();
+    await connection.commit();
     return res.json({ success: true, data: { purchase_id: pres.insertId } });
 
   } catch (err) {
-    try { await db.promise().rollback(); } catch (_) {}
+    try { await connection.rollback(); } catch (_) {}
     console.error("POST /api/purchases error:", {
       code: err.code, errno: err.errno, sqlState: err.sqlState, message: err.message
     });
     return res.status(500).json({ success: false, message: err.message });
+  } finally {
+    connection.release(); // ⚠️ สำคัญมาก! ต้อง release connection
   }
 });
-
-
-
-
-
-
 
 ///////////////////GET CART (เฉพาะ pending)
 app.get("/api/cart", authencationToken, async (req, res) => {
   try {
-    const c = await db.promise().getConnection();
-    const [rows] = await c.query(
+    const [rows] = await promisePool.query(
       `SELECT p.purchase_id, l.lotto_id, l.number, l.price, l.draw_date
        FROM purchases p
        JOIN lotto_numbers l ON p.lotto_id = l.lotto_id
@@ -1017,64 +915,68 @@ app.get("/api/cart", authencationToken, async (req, res) => {
   }
 });
 
-
-
-////////// CANCEL PURCHASE
+////////// CANCEL PURCHASE - FIXED
 app.patch("/api/purchases/:id/cancel", authencationToken, async (req, res) => {
-  const c = await db.promise().getConnection();
+  const connection = await promisePool.getConnection();
   try {
     const pid = Number(req.params.id) || 0;
     if (!pid) return res.status(400).json({ success: false, message: "Missing purchase_id" });
 
-    await c.beginTransaction();
+    await connection.beginTransaction();
 
-    const [u] = await c.query("SELECT user_id FROM users WHERE email=?", [req.user.id]);
-    if (u.length === 0) { await c.rollback(); return res.status(401).json({ success:false, message:"Unauthorized" }); }
+    const [u] = await connection.query("SELECT user_id FROM users WHERE email=?", [req.user.id]);
+    if (u.length === 0) { 
+      await connection.rollback(); 
+      return res.status(401).json({ success:false, message:"Unauthorized" }); 
+    }
     const user_id = u[0].user_id;
 
-    const [prows] = await c.query(
+    const [prows] = await connection.query(
       `SELECT p.purchase_id, p.user_id, p.lotto_id, p.status
        FROM purchases p
-       WHERE p.purchase_id=? AND p.user_id=?  FOR UPDATE`,
+       WHERE p.purchase_id=? AND p.user_id=? FOR UPDATE`,
       [pid, user_id]
     );
-    if (prows.length === 0) { await c.rollback(); return res.status(404).json({ success:false, message:"ไม่พบรายการของคุณ" }); }
-    if (prows[0].status !== 'pending') { await c.rollback(); return res.status(400).json({ success:false, message:"ยกเลิกได้เฉพาะ pending" }); }
+    if (prows.length === 0) { 
+      await connection.rollback(); 
+      return res.status(404).json({ success:false, message:"ไม่พบรายการของคุณ" }); 
+    }
+    if (prows[0].status !== 'pending') { 
+      await connection.rollback(); 
+      return res.status(400).json({ success:false, message:"ยกเลิกได้เฉพาะ pending" }); 
+    }
 
-    await c.query("UPDATE purchases SET status='cancelled' WHERE purchase_id=?", [pid]);
-    await c.query("UPDATE lotto_numbers SET status='available' WHERE lotto_id=?", [prows[0].lotto_id]);
+    await connection.query("UPDATE purchases SET status='cancelled' WHERE purchase_id=?", [pid]);
+    await connection.query("UPDATE lotto_numbers SET status='available' WHERE lotto_id=?", [prows[0].lotto_id]);
 
-    await c.commit();
+    await connection.commit();
     res.json({ success: true, message: "ยกเลิกสำเร็จ" });
   } catch (err) {
-    try { await db.promise().rollback(); } catch {}
+    try { await connection.rollback(); } catch {}
     res.status(500).json({ success: false, message: err.message });
+  } finally {
+    connection.release(); // ⚠️ สำคัญมาก!
   }
 });
 
-
-
-
-
-
-
+// CHECKOUT - FIXED
 app.post("/api/checkout", authencationToken, async (req, res) => {
-  const c = await db.promise().getConnection();
+  const connection = await promisePool.getConnection();
   try {
-    await c.beginTransaction();
+    await connection.beginTransaction();
 
-    const [urows] = await c.query(
+    const [urows] = await connection.query(
       "SELECT user_id, wallet FROM users WHERE email=? FOR UPDATE",
       [req.user.id]
     );
     if (urows.length === 0) {
-      await c.rollback();
+      await connection.rollback();
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
     const user_id = urows[0].user_id;
     const walletBefore = Number(urows[0].wallet ?? 0);
 
-    const [cart] = await c.query(
+    const [cart] = await connection.query(
       `SELECT p.purchase_id, p.lotto_id, l.price
        FROM purchases p
        JOIN lotto_numbers l ON p.lotto_id = l.lotto_id
@@ -1084,16 +986,16 @@ app.post("/api/checkout", authencationToken, async (req, res) => {
     );
 
     if (cart.length === 0) {
-      await c.rollback();
+      await connection.rollback();
       return res.status(400).json({ success: false, message: "ไม่มีรายการในตะกร้า" });
     }
 
     const purchaseIds = cart.map(r => r.purchase_id);
-    const lottoIds    = cart.map(r => r.lotto_id);
+    const lottoIds = cart.map(r => r.lotto_id);
     const total = cart.reduce((sum, r) => sum + Number(r.price ?? 0), 0);
 
     if (walletBefore < total) {
-      await c.rollback();
+      await connection.rollback();
       return res.status(400).json({
         success: false,
         message: "ยอดเงินไม่พอ",
@@ -1102,28 +1004,28 @@ app.post("/api/checkout", authencationToken, async (req, res) => {
       });
     }
 
-    const [lrows] = await c.query(
+    const [lrows] = await connection.query(
       `SELECT lotto_id FROM lotto_numbers 
        WHERE lotto_id IN (${lottoIds.map(() => '?').join(',')}) 
          AND status='in_cart' FOR UPDATE`,
       lottoIds
     );
     if (lrows.length !== lottoIds.length) {
-      await c.rollback();
+      await connection.rollback();
       return res.status(409).json({
         success: false,
         message: "บางรายการไม่อยู่ในตะกร้าแล้ว กรุณารีเฟรชตะกร้า"
       });
     }
 
-    await c.query(
+    await connection.query(
       `UPDATE purchases 
          SET status='purchased' 
        WHERE purchase_id IN (${purchaseIds.map(() => '?').join(',')}) 
          AND status='pending'`,
       purchaseIds
     );
-    await c.query(
+    await connection.query(
       `UPDATE lotto_numbers 
          SET status='sold' 
        WHERE lotto_id IN (${lottoIds.map(() => '?').join(',')}) 
@@ -1132,12 +1034,12 @@ app.post("/api/checkout", authencationToken, async (req, res) => {
     );
 
     const walletAfter = walletBefore - total;
-    await c.query(
+    await connection.query(
       "UPDATE users SET wallet=? WHERE user_id=?",
       [walletAfter, user_id]
     );
 
-    await c.commit();
+    await connection.commit();
     return res.json({
       success: true,
       message: "ชำระเงินสำเร็จ",
@@ -1147,27 +1049,24 @@ app.post("/api/checkout", authencationToken, async (req, res) => {
       wallet_after: walletAfter
     });
   } catch (err) {
-    try { await db.promise().rollback(); } catch {}
+    try { await connection.rollback(); } catch {}
     console.error("POST /api/checkout error:", err);
     return res.status(500).json({ success: false, message: err.message });
+  } finally {
+    connection.release(); // ⚠️ สำคัญมาก!
   }
 });
 
-
-
-
-
-
-
-
 //////////////////////////////keeen//////////////////////////////
 
-
+// CLAIM PRIZE - FIXED
 app.post("/api/claim-prize", authencationToken, async (req, res) => {
   console.log("===== CLAIM PRIZE START =====");
+  const connection = await promisePool.getConnection();
+  
   try {
     const { lotto_id } = req.body;
-    const email = req.user.id; // email จาก JWT
+    const email = req.user.id;
     
     console.log("Email from token:", email);
     console.log("Lotto ID to claim:", lotto_id);
@@ -1179,17 +1078,21 @@ app.post("/api/claim-prize", authencationToken, async (req, res) => {
       });
     }
 
+    await connection.beginTransaction();
+
     // ตรวจสอบว่าผู้ใช้ซื้อหวยนี้จริงหรือไม่
     const purchaseCheckSql = `
       SELECT p.purchase_id, p.lotto_id, p.status, u.user_id, u.wallet, u.email
       FROM purchases p
       JOIN users u ON p.user_id = u.user_id
       WHERE u.email = ? AND p.lotto_id = ? AND p.status = 'purchased'
+      FOR UPDATE
     `;
     
-    const [purchaseRows] = await db.promise().query(purchaseCheckSql, [email, lotto_id]);
+    const [purchaseRows] = await connection.query(purchaseCheckSql, [email, lotto_id]);
 
     if (purchaseRows.length === 0) {
+      await connection.rollback();
       return res.status(404).json({
         success: false,
         message: "ไม่พบการซื้อหวยนี้หรือยังไม่ได้ชำระเงิน"
@@ -1200,12 +1103,13 @@ app.post("/api/claim-prize", authencationToken, async (req, res) => {
     console.log("Purchase found:", purchase);
 
     // ตรวจสอบว่าเคยขึ้นเงินแล้วหรือยัง
-    const [lottoStatus] = await db.promise().query(
+    const [lottoStatus] = await connection.query(
       "SELECT status FROM lotto_numbers WHERE lotto_id = ?",
       [lotto_id]
     );
 
     if (lottoStatus[0]?.status === 'cashed') {
+      await connection.rollback();
       return res.status(400).json({
         success: false,
         message: "เคยขึ้นเงินรางวัลนี้แล้ว"
@@ -1221,9 +1125,10 @@ app.post("/api/claim-prize", authencationToken, async (req, res) => {
       ORDER BY wn.prize_rank ASC
     `;
     
-    const [winningRows] = await db.promise().query(winningSql, [lotto_id]);
+    const [winningRows] = await connection.query(winningSql, [lotto_id]);
 
     if (winningRows.length === 0) {
+      await connection.rollback();
       return res.status(400).json({
         success: false,
         message: "หวยใบนี้ไม่ได้ถูกรางวัล"
@@ -1249,58 +1154,82 @@ app.post("/api/claim-prize", authencationToken, async (req, res) => {
     console.log(`Total prize amount: ${totalPrizeAmount}, Current wallet: ${currentWallet}, New wallet: ${newWallet}`);
     console.log("Prize details:", prizeDetails);
 
-    // เริ่ม Transaction
-    await db.promise().query("START TRANSACTION");
+    // อัปเดตเงินในกระเป๋า
+    await connection.query(
+      "UPDATE users SET wallet = ? WHERE user_id = ?",
+      [newWallet, purchase.user_id]
+    );
 
-    try {
-      // 1. อัปเดตเงินในกระเป๋า
-      await db.promise().query(
-        "UPDATE users SET wallet = ? WHERE user_id = ?",
-        [newWallet, purchase.user_id]
-      );
+    // อัปเดต lotto_numbers status เป็น 'cashed'
+    await connection.query(
+      "UPDATE lotto_numbers SET status = 'cashed' WHERE lotto_id = ?",
+      [lotto_id]
+    );
 
-      // 2. อัปเดต lotto_numbers status เป็น 'cashed'
-      await db.promise().query(
-        "UPDATE lotto_numbers SET status = 'cashed' WHERE lotto_id = ?",
-        [lotto_id]
-      );
+    // อัปเดต purchases เพิ่ม cashout_date
+    await connection.query(
+      "UPDATE purchases SET cashout_date = NOW() WHERE purchase_id = ?",
+      [purchase.purchase_id]
+    );
 
-      // 3. อัปเดต purchases เพิ่ม cashout_date
-      await db.promise().query(
-        "UPDATE purchases SET cashout_date = NOW() WHERE purchase_id = ?",
-        [purchase.purchase_id]
-      );
+    await connection.commit();
+    
+    console.log("Multiple prizes claimed successfully");
 
-      await db.promise().query("COMMIT");
-      
-      console.log("Multiple prizes claimed successfully");
-
-      res.json({
-        success: true,
-        message: "ขึ้นเงินรางวัลสำเร็จ",
-        data: {
-          total_prize_amount: totalPrizeAmount,
-          wallet_before: currentWallet,
-          wallet_after: newWallet,
-          prizes: prizeDetails,
-          lotto_number: winningRows[0].number,
-          prizes_count: winningRows.length
-        }
-      });
-
-    } catch (error) {
-      await db.promise().query("ROLLBACK");
-      throw error;
-    }
+    res.json({
+      success: true,
+      message: "ขึ้นเงินรางวัลสำเร็จ",
+      data: {
+        total_prize_amount: totalPrizeAmount,
+        wallet_before: currentWallet,
+        wallet_after: newWallet,
+        prizes: prizeDetails,
+        lotto_number: winningRows[0].number,
+        prizes_count: winningRows.length
+      }
+    });
 
   } catch (err) {
+    try { await connection.rollback(); } catch {}
     console.error("Error in claim prize:", err);
     res.status(500).json({
       success: false,
       message: "เกิดข้อผิดพลาดในการขึ้นเงินรางวัล"
     });
+  } finally {
+    connection.release(); // ⚠️ สำคัญมาก!
   }
   
   console.log("===== CLAIM PRIZE END =====");
 });
 
+// =============== START SERVER ===============
+app.listen(port, () => {
+  console.log(`🚀 Server is running on port ${port}`);
+  console.log(`🌐 Server IP: ${ip}:${port}`);
+});
+
+// =============== GRACEFUL SHUTDOWN ===============
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  db.end((err) => {
+    if (err) {
+      console.error('Error closing database pool:', err);
+    } else {
+      console.log('Database pool closed');
+    }
+    process.exit(err ? 1 : 0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT signal received: closing HTTP server');
+  db.end((err) => {
+    if (err) {
+      console.error('Error closing database pool:', err);
+    } else {
+      console.log('Database pool closed');
+    }
+    process.exit(err ? 1 : 0);
+  });
+});
